@@ -1,14 +1,15 @@
 import importlib
 import logging
 from optparse import make_option
+import multiprocessing
 
 from django.core.management.base import BaseCommand
-
 from django_rq.queues import get_queues
-
 from redis.exceptions import ConnectionError
 from rq import use_connection
 from rq.utils import ColorizingStreamHandler
+
+
 
 
 # Setup logging for RQWorker if not already configured
@@ -60,10 +61,32 @@ class Command(BaseCommand):
             default=None,
             help='Name of the worker'
         ),
+        make_option(
+            '--count',
+            action='store',
+            dest='count',
+            default=1,
+            help='Amount of workers'
+        ),
     )
     args = '<queue queue ...>'
 
     def handle(self, *args, **options):
+        worker_count = int(options['count'])
+        if worker_count > 1:
+            jobs = []
+            name = options['name']
+            for i in range(worker_count):
+                if name:
+                    options['name'] = '{}.{}'.format(name, i)
+                p = multiprocessing.Process(target=self.worker, args=args, kwargs=options)
+                jobs.append(p)
+                p.start()
+        else:
+            self.worker(*args, **options)
+
+    @staticmethod
+    def worker(*args, **options):
         try:
             # Instantiate a worker
             worker_class = import_attribute(options.get('worker_class', 'rq.Worker'))
